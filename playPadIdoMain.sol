@@ -1,18 +1,5 @@
 pragma solidity 0.6.12;
 
-// SPDX-License-Identifier: MIT
-// SPDX-License-Identifier: MIT
-
-/*
- * @dev Provides information about the current execution context, including the
- * sender of the transaction and its data. While these are generally available
- * via msg.sender and msg.data, they should not be accessed in such a direct
- * manner, since when dealing with GSN meta-transactions the account sending and
- * paying for execution may not be the actual sender (as far as an application
- * is concerned).
- *
- * This contract is only required for intermediate, library-like contracts.
- */
 abstract contract Context {
     function _msgSender() internal view virtual returns (address payable) {
         return msg.sender;
@@ -24,18 +11,6 @@ abstract contract Context {
     }
 }
 
-/**
- * @dev Contract module which provides a basic access control mechanism, where
- * there is an account (an owner) that can be granted exclusive access to
- * specific functions.
- *
- * By default, the owner account will be the one that deploys the contract. This
- * can later be changed with {transferOwnership}.
- *
- * This module is used through inheritance. It will make available the modifier
- * `onlyOwner`, which can be applied to your functions to restrict their use to
- * the owner.
- */
 abstract contract Ownable is Context {
     address private _owner;
 
@@ -758,65 +733,59 @@ contract test {
     }
 }
 
-contract ArgonStakingPool is Ownable, ReentrancyGuard {
+contract MainPlayPadContract is Ownable, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
-    IERC20 public stakingToken;
-    IERC20 public rewardToken;
-    uint256 public startBlock;
-    uint256 public lastRewardBlock;
-    uint256 public finishBlock;
-    uint256 public allStakedAmount;
-    uint256 public allPaidReward;
-    uint256 public allRewardDebt;
-    uint256 public poolTokenAmount;
-    uint256 public rewardPerBlock;
-    uint256 public accTokensPerShare; // Accumulated tokens per share
-    uint256 public participants; //Count of participants
-    bool public isPenalty;
-    uint256 public penaltyRate;
-    uint256 public penaltyBlockLength;
-    address public penaltyAddress;
-    uint256 public stakeStartDate;
-    bool public stakeStatus;
-    uint256 public investorPercent;
-    bool public onlyPrize;
-    uint256 limitForPrize;
-    address[] public newIdo;
+    IERC20 public stakingToken; //staking token
+    IERC20 public rewardToken; // reward token contract address for investors
+    uint256 public startBlock; // start block number to decide vestings and distrubute prizes 
+    uint256 public lastRewardBlock; //last reward block to distrubute reward tokens.
+    uint256 public finishBlock; //Finish block number for staking deposits.
+    uint256 public allStakedAmount; //total staked value as tokens.
+    uint256 public allPaidReward; //total distrubuted tokens value.
+    uint256 public allRewardDebt; //total pending reward value.
+    uint256 public poolTokenAmount; //total prize to be distrubuted for period.
+    uint256 public rewardPerBlock; //reward value per block.
+    uint256 public accTokensPerShare; // Accumulated tokens per share.
+    uint256 public participants; //Count of participants.
+    bool public isPenalty; //penalty status for each deposit.
+    uint256 public penaltyRate; //penaltyRate for pool.
+    uint256 public penaltyBlockLength; //penalty block duration as block number.
+    address public penaltyAddress; //Penalty address.
+    uint256 public stakeStartDate; //first date of deposit of user above limit for vesting.
+    bool public stakeStatus; //User stake status.
+    bool public onlyPrize; //Only prize, No vesting.
+    uint256 limitForPrize; // limit token count to get vesting from IDOs.
+    address[] public newIdo; // All deployed IDO addresses.
     
 
-    // Info of each user.
+    // Info of each investor.
     struct UserInfo {
         uint256 amount; // How many tokens the user has staked.
         uint256 rewardDebt; // Reward debt
-        uint256[] userPoolIds;
-        uint256 investorPercent;
-        bool stakeStatus;
-        uint256 stakeStartDate;
-        uint256 onlyPrize;
+        uint256[] userPoolIds; // User Deposits
+        bool stakeStatus; //User Stake Status.
+        uint256 stakeStartDate; // first date of deposit of user above limit for vesting.
+        bool onlyPrize; // Only prize, No vesting.
     }
     
-    struct idoDetailsForInvestor {
-        uint256 totalBuyingAmountBNB;
-        uint256 totalBuyingAmountToken;
-        uint256 allowedBuyAmount;
-        uint256 investorPercent;
-    }
     
     struct UserPoolInfo {
-        uint256 blockNumber;
-        uint256 penaltyEndBlockNumber;
-        uint256 amount;
-        address owner;
+        uint256 blockNumber; //start block number of deposit..
+        uint256 penaltyEndBlockNumber; // penalty end block number for deposit.
+        uint256 amount; //amount of deposit.
+        address owner; //deposited by
     }
+    
+    //mappings to reach datas of investors and pools.
     mapping(address => UserInfo) public userInfo;
-    mapping(address => investorData) public _investorData;
     mapping(uint256 => UserPoolInfo) public userPoolInfo;
     mapping(uint256 => bool) public availablePools;
     mapping(address => mapping(address => bool)) public isInvestorWhitelisted;
-    mapping(address => mapping(address => idoDetailsForInvestor)) public _investorIdoDetails;
+    mapping(address => bool) public isIdoDeployed;
 
+    //live events for contract
     event FinishBlockUpdated(uint256 newFinishBlock);
     event PoolReplenished(uint256 amount);
     event TokensStaked(address indexed user, uint256 amount, uint256 reward);
@@ -863,7 +832,7 @@ contract ArgonStakingPool is Ownable, ReentrancyGuard {
         finishBlock = _finishBlock;
         poolTokenAmount = _poolTokenAmount;
         rewardPerBlock = _poolTokenAmount.div(_finishBlock.sub(_startBlock));
-        limitForPrize = _limitForPrize
+        limitForPrize = _limitForPrize;
     }
 
     function getMultiplier(uint256 _from, uint256 _to)
@@ -900,29 +869,34 @@ contract ArgonStakingPool is Ownable, ReentrancyGuard {
             );
     }
   
-    function getInvestorInfo(address idoContractAddress, address investorAddress) external view returns(bool, uint256, uint256, uint256, uint256){
-       investor = _investorIdoDetails[idoContractAddress][investorAddress];
-       isInvestorWhitelisted = isInvestorWhitelisted[idoContractAddress][investorAddress];
-       return(isInvestorWhitelisted, investor.totalBuyingAmountBNB, investor.totalBuyingAmountToken, investor.allowedBuyAmount, investor.investorPercent);
+    /*
+    Define users vestings and addresses according to datas taken from javascript. function at javascript controls buy limits and other details
+    after that it multiples stake duration time of users with their deposited amounts and converts them to percentage based result and calculate their buying amounts according to tokenomics of IDO
+    */
+    function defineWhitelistUsers(address _idoContractAddress,  address[] memory _whitelistedAddresses, uint256[] memory _buyingLimits) external  nonReentrant onlyOwner {
+        require(isIdoDeployed[_idoContractAddress]);
+        PlayPadIdoContract _deployedIdo;
+        _deployedIdo = PlayPadIdoContract(_idoContractAddress);
+        _deployedIdo.addUsersToWhitelist(_whitelistedAddresses, _buyingLimits);
     }
-    
-    function takeSnapshotForWhitelist() nonReentrant onlyOwner{
-        
-    }
-  
+    // get investor details
     function getUserInfo(address _user)
         external
         view
         returns (
             uint256,
             uint256,
-            uint256[] memory
+            uint256[] memory,
+            bool,
+            uint256,
+            bool
         )
     {
         UserInfo storage user = userInfo[_user];
-        return (user.amount, user.rewardDebt, user.userPoolIds);
+        return (user.amount, user.rewardDebt, user.userPoolIds, user.stakeStatus, user.stakeStartDate, user.onlyPrize);
     }
-
+    
+    
     function getUserPoolInfo(uint256 _poolId)
         external
         view
@@ -940,6 +914,10 @@ contract ArgonStakingPool is Ownable, ReentrancyGuard {
             poolInfo.amount,
             poolInfo.owner
         );
+    }
+    //returns contract addresses of all deployed IDOs
+     function getIdos() external view returns (address[] memory)  {
+        return newIdo;
     }
 
     // Update reward variables of the given pool to be up-to-date.
@@ -960,41 +938,41 @@ contract ArgonStakingPool is Ownable, ReentrancyGuard {
         lastRewardBlock = block.number;
     }
     
- 
+    
+       // creates new IDO contract following datas as below
        function createIDO(
-        IERC20 busdAddress,
-        IERC20 saleToken,
-        bool contractStatus,
-        string IdoName,
-        uint256 hardcapUsd,
-        uint256 totalSellAmountToken,
-        uint256 maxInvestorCount,
-        uint256 startTime,
-        uint256 endTime,
-        uint256 mainContractAddress,
+        IERC20 _busdAddress,
+        IERC20 _saleToken,
+        bool _contractStatus,
+        uint256 _hardcapUsd,
+        uint256 _totalSellAmountToken,
+        uint256 _maxInvestorCount,
+        uint256 _maxBuyValue,
+        uint256 _startTime,
+        uint256 _endTime
     ) external nonReentrant onlyOwner {
-        address newIdo = new IdoContract(
+         PlayPadIdoContract newIdoContract = new PlayPadIdoContract(
             _busdAddress,
             _saleToken,
             _contractStatus,
-            _idoName,
             _hardcapUsd,
             _totalSellAmountToken,
             _maxInvestorCount,
+            _maxBuyValue,
             _startTime,
-            _endTime,
-            this,
+            _endTime
         );
-        deployedIdo.push(newIdo); // Adding All Works
-        IdoContract.transferOwnership(msg.sender);
+        newIdo.push(address(newIdoContract)); // Adding All IDOs
+        newIdoContract.transferOwnership(msg.sender);
         _saleToken.transferFrom(
             msg.sender,
-            address(newIdo),
+            address(newIdoContract),
             _totalSellAmountToken
         );
+        isIdoDeployed[address(newIdoContract)] = true;
     }
     
-
+    //stake tokens with controls
     function stakeTokens(uint256 _amountToStake) external nonReentrant {
         updatePool();
         uint256 pending = 0;
@@ -1032,11 +1010,11 @@ contract ArgonStakingPool is Ownable, ReentrancyGuard {
                 penaltyBlockLength
             );
             
-            if(user.amount.add(_amountToStake) > _limitForPrize){
-                user.onlyPrize = false
+            if(user.amount.add(_amountToStake) > limitForPrize){
+                user.onlyPrize = false;
                 user.stakeStartDate = block.timestamp;
             }else{
-                user.onlyPrize = true
+                user.onlyPrize = true;
             }
             user.stakeStatus = true;
             user.userPoolIds.push(randomPoolId);
@@ -1067,14 +1045,14 @@ contract ArgonStakingPool is Ownable, ReentrancyGuard {
         
         if (_amount > 0) {
             user.amount = user.amount.sub(_amount);
-            if(user.amount > limitForPrize){
+            if(user.amount.sub(_amount) > limitForPrize){
                 user.onlyPrize = false;
             }else{
                 user.onlyPrize = true;
                 user.stakeStartDate = 0;
             }
             poolInfo.amount = poolInfo.amount.sub(_amount);
-            if (isPenalty === true && onlyPrize === true) {
+            if (isPenalty == true && onlyPrize == true) {
                 if (block.number < finishBlock) {
                     if (block.number <= poolInfo.penaltyEndBlockNumber) {
                         penaltyAmount = penaltyRate.mul(_amount).div(1e6);
@@ -1113,46 +1091,6 @@ contract ArgonStakingPool is Ownable, ReentrancyGuard {
         return pending;
     }
 
-    // Withdraw without caring about rewards. EMERGENCY ONLY.
-    function withdrawAllPools() external nonReentrant {
-        UserInfo storage user = userInfo[msg.sender];
-        uint256 totalPenalty = 0;
-        updatePool();
-        uint256 pending = transferPendingReward(user);
-
-        for (uint256 i = 0; i < user.userPoolIds.length; i++) {
-            uint256 poolId = user.userPoolIds[i];
-            UserPoolInfo storage poolInfo = userPoolInfo[poolId];
-            if (poolInfo.amount > 0) {
-                if (isPenalty) {
-                    if (block.number < finishBlock) {
-                        if (block.number <= poolInfo.penaltyEndBlockNumber) {
-                            uint256 penaltyAmount =
-                                penaltyRate.mul(poolInfo.amount).div(1e6);
-                            totalPenalty.add(penaltyAmount);
-                            stakingToken.transfer(
-                                penaltyAddress,
-                                penaltyAmount
-                            );
-                        }
-                    }
-                }
-                poolInfo.amount = 0;
-            }
-        }
-        if (user.amount > 0) {
-            stakingToken.safeTransfer(
-                msg.sender,
-                user.amount.sub(totalPenalty)
-            );
-            emit WithdrawAllPools(msg.sender, user.amount);
-            allStakedAmount = allStakedAmount.sub(user.amount);
-            allRewardDebt = allRewardDebt.sub(user.rewardDebt);
-            user.amount = 0;
-            user.rewardDebt = 0;
-            participants -= 1;
-        }
-    }
 
     function withdrawPoolRemainder() external onlyOwner nonReentrant {
         require(block.number > finishBlock, "Allow after finish");
@@ -1166,3 +1104,5 @@ contract ArgonStakingPool is Ownable, ReentrancyGuard {
         emit WithdrawPoolRemainder(msg.sender, returnAmount);
     }
 }
+
+
