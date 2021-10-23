@@ -11,6 +11,105 @@ abstract contract Context {
     }
 }
 
+library Roles {
+    struct Role {
+        mapping(address => bool) bearer;
+    }
+
+    function add(Role storage role, address account) internal {
+        require(!has(role, account));
+        role.bearer[account] = true;
+    }
+
+    function remove(Role storage role, address account) internal {
+        require(has(role, account));
+        role.bearer[account] = false;
+    }
+
+    function has(Role storage role, address account)
+        internal
+        view
+        returns (bool)
+    {
+        require(account != address(0));
+        return role.bearer[account];
+    }
+}
+
+contract ApproverRole {
+    using Roles for Roles.Role;
+
+    event ApproverAdded(address indexed account);
+    event ApproverRemoved(address indexed account);
+
+    Roles.Role private _approvers;
+
+    address firstSignAddress;
+    address secondSignAddress;
+
+    mapping(address => bool) signed; // Signed flag
+
+    constructor() internal {
+        _addApprover(msg.sender);
+
+        firstSignAddress = 0x; // You should change this address to your first sign address
+        secondSignAddress = 0x; // You should change this address to your second sign address
+    }
+
+    modifier onlyApprover() {
+        require(isApprover(msg.sender));
+        _;
+    }
+
+    function sign() external {
+        require(
+            msg.sender == firstSignAddress || msg.sender == secondSignAddress
+        );
+        require(!signed[msg.sender]);
+        signed[msg.sender] = true;
+    }
+
+    function isApprover(address account) public view returns (bool) {
+        return _approvers.has(account);
+    }
+
+    function addApprover(address account) external onlyApprover {
+        require(signed[firstSignAddress] && signed[secondSignAddress]);
+        _addApprover(account);
+
+        signed[firstSignAddress] = false;
+        signed[secondSignAddress] = false;
+    }
+
+    function removeApprover(address account) external onlyApprover {
+        require(signed[firstSignAddress] && signed[secondSignAddress]);
+        _removeApprover(account);
+
+        signed[firstSignAddress] = false;
+        signed[secondSignAddress] = false;
+    }
+
+    function renounceApprover() external {
+        require(signed[firstSignAddress] && signed[secondSignAddress]);
+        _removeApprover(msg.sender);
+
+        signed[firstSignAddress] = false;
+        signed[secondSignAddress] = false;
+    }
+
+    function _addApprover(address account) internal {
+        _approvers.add(account);
+        emit ApproverAdded(account);
+    }
+
+    function _removeApprover(address account) internal {
+        _approvers.remove(account);
+        emit ApproverRemoved(account);
+    }
+}
+
+
+
 abstract contract Ownable is Context {
     address private _owner;
 
@@ -43,13 +142,7 @@ abstract contract Ownable is Context {
         _;
     }
 
-    /**
-     * @dev Leaves the contract without owner. It will not be possible to call
-     * `onlyOwner` functions anymore. Can only be called by the current owner.
-     *
-     * NOTE: Renouncing ownership will leave the contract without an owner,
-     * thereby removing any functionality that is only available to the owner.
-     */
+  
     function renounceOwnership() public virtual onlyOwner {
         emit OwnershipTransferred(_owner, address(0));
         _owner = address(0);
@@ -69,22 +162,6 @@ abstract contract Ownable is Context {
     }
 }
 
-/**
- * @dev Contract module that helps prevent reentrant calls to a function.
- *
- * Inheriting from `ReentrancyGuard` will make the {nonReentrant} modifier
- * available, which can be applied to functions to make sure there are no nested
- * (reentrant) calls to them.
- *
- * Note that because there is a single `nonReentrant` guard, functions marked as
- * `nonReentrant` may not call one another. This can be worked around by making
- * those functions `private`, and then adding `external` `nonReentrant` entry
- * points to them.
- *
- * TIP: If you would like to learn more about reentrancy and alternative ways
- * to protect against it, check out our blog post
- * https://blog.openzeppelin.com/reentrancy-after-istanbul/[Reentrancy After Istanbul].
- */
 abstract contract ReentrancyGuard {
     // Booleans are more expensive than uint256 or any type that takes up a full
     // word because each write operation emits an extra SLOAD to first read the
@@ -128,30 +205,8 @@ abstract contract ReentrancyGuard {
     }
 }
 
-/**
- * @dev Wrappers over Solidity's arithmetic operations with added overflow
- * checks.
- *
- * Arithmetic operations in Solidity wrap on overflow. This can easily result
- * in bugs, because programmers usually assume that an overflow raises an
- * error, which is the standard behavior in high level programming languages.
- * `SafeMath` restores this intuition by reverting the transaction when an
- * operation overflows.
- *
- * Using this library instead of the unchecked operations eliminates an entire
- * class of bugs, so it's recommended to use it always.
- */
 library SafeMath {
-    /**
-     * @dev Returns the addition of two unsigned integers, reverting on
-     * overflow.
-     *
-     * Counterpart to Solidity's `+` operator.
-     *
-     * Requirements:
-     *
-     * - Addition cannot overflow.
-     */
+  
     function add(uint256 a, uint256 b) internal pure returns (uint256) {
         uint256 c = a + b;
         require(c >= a, "SafeMath: addition overflow");
@@ -722,18 +777,7 @@ interface IERC20 {
     );
 }
 
-contract test {
-    function random(uint256 amount) public view returns (uint256) {
-        return
-            uint256(
-                keccak256(
-                    abi.encodePacked(msg.sender, now, block.number, amount)
-                )
-            );
-    }
-}
-
-contract MainPlayPadContract is Ownable, ReentrancyGuard {
+contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
@@ -756,9 +800,9 @@ contract MainPlayPadContract is Ownable, ReentrancyGuard {
     uint256 public stakeStartDate; //first date of deposit of user above limit for vesting.
     bool public stakeStatus; //User stake status.
     bool public onlyPrize; //Only prize, No vesting.
-    uint256 limitForPrize; // limit token count to get vesting from IDOs.
+    uint256 public limitForPrize; // limit token count to get vesting from IDOs.
     address[] public newIdo; // All deployed IDO addresses.
-    
+    address[] public allInvestors; //return all investor
 
     // Info of each investor.
     struct UserInfo {
@@ -768,6 +812,7 @@ contract MainPlayPadContract is Ownable, ReentrancyGuard {
         bool stakeStatus; //User Stake Status.
         uint256 stakeStartDate; // first date of deposit of user above limit for vesting.
         bool onlyPrize; // Only prize, No vesting.
+        address userAddress;
     }
     
     
@@ -792,7 +837,8 @@ contract MainPlayPadContract is Ownable, ReentrancyGuard {
     event StakeWithdrawn(address indexed user, uint256 amount, uint256 reward);
     event WithdrawAllPools(address indexed user, uint256 amount);
     event WithdrawPoolRemainder(address indexed user, uint256 amount);
-
+    event NewIdoCreated(address indexed idoUser);
+    
     constructor(
         IERC20 _stakingToken,
         IERC20 _poolToken,
@@ -869,33 +915,6 @@ contract MainPlayPadContract is Ownable, ReentrancyGuard {
             );
     }
   
-    /*
-    Define users vestings and addresses according to datas taken from javascript. function at javascript controls buy limits and other details
-    after that it multiples stake duration time of users with their deposited amounts and converts them to percentage based result and calculate their buying amounts according to tokenomics of IDO
-    */
-    function defineWhitelistUsers(address _idoContractAddress,  address[] memory _whitelistedAddresses, uint256[] memory _buyingLimits) external  nonReentrant onlyOwner {
-        require(isIdoDeployed[_idoContractAddress]);
-        PlayPadIdoContract _deployedIdo;
-        _deployedIdo = PlayPadIdoContract(_idoContractAddress);
-        _deployedIdo.addUsersToWhitelist(_whitelistedAddresses, _buyingLimits);
-    }
-    // get investor details
-    function getUserInfo(address _user)
-        external
-        view
-        returns (
-            uint256,
-            uint256,
-            uint256[] memory,
-            bool,
-            uint256,
-            bool
-        )
-    {
-        UserInfo storage user = userInfo[_user];
-        return (user.amount, user.rewardDebt, user.userPoolIds, user.stakeStatus, user.stakeStartDate, user.onlyPrize);
-    }
-    
     
     function getUserPoolInfo(uint256 _poolId)
         external
@@ -918,6 +937,29 @@ contract MainPlayPadContract is Ownable, ReentrancyGuard {
     //returns contract addresses of all deployed IDOs
      function getIdos() external view returns (address[] memory)  {
         return newIdo;
+    }
+    
+    function getInvestors() external view returns (uint256[] memory, uint256[] memory, bool[] memory, uint256[] memory, bool[] memory, address[] memory) {
+     
+     address[] memory _userAddress = new address[](allInvestors.length);
+     uint256[] memory _amount = new uint256[](allInvestors.length);
+     uint256[] memory _rewardDebt = new uint256[](allInvestors.length);
+     bool[] memory _stakeStatus = new bool[](allInvestors.length);
+     uint256[] memory _stakeStartDate = new uint256[](allInvestors.length);
+     bool[] memory _onlyPrize = new bool[](allInvestors.length);
+     
+        for (uint256 i = 0; i < allInvestors.length; i++) {
+            UserInfo storage userData = userInfo[allInvestors[i]];
+            _userAddress[i] = userData.userAddress;
+            _amount[i] = userData.amount;
+            _rewardDebt[i] = userData.rewardDebt;
+            _stakeStatus[i] = userData.stakeStatus;
+            _stakeStartDate[i] = userData.stakeStartDate;
+            _onlyPrize[i] = userData.onlyPrize;
+        }
+        
+        return(_amount, _rewardDebt, _stakeStatus, _stakeStartDate, _onlyPrize, _userAddress);
+  
     }
 
     // Update reward variables of the given pool to be up-to-date.
@@ -950,7 +992,7 @@ contract MainPlayPadContract is Ownable, ReentrancyGuard {
         uint256 _maxBuyValue,
         uint256 _startTime,
         uint256 _endTime
-    ) external nonReentrant onlyOwner {
+    ) external nonReentrant onlyApprover {
          PlayPadIdoContract newIdoContract = new PlayPadIdoContract(
             _busdAddress,
             _saleToken,
@@ -964,12 +1006,12 @@ contract MainPlayPadContract is Ownable, ReentrancyGuard {
         );
         newIdo.push(address(newIdoContract)); // Adding All IDOs
         newIdoContract.transferOwnership(msg.sender);
-        _saleToken.transferFrom(
-            msg.sender,
-            address(newIdoContract),
-            _totalSellAmountToken
-        );
         isIdoDeployed[address(newIdoContract)] = true;
+        emit NewIdoCreated(address(newIdoContract));
+    }
+    
+    function changePrizeLimit(uint256 _amountToStake) external nonReentrant onlyApprover {
+        limitForPrize = _amountToStake;
     }
     
     //stake tokens with controls
@@ -1002,6 +1044,9 @@ contract MainPlayPadContract is Ownable, ReentrancyGuard {
                 address(this),
                 _amountToStake
             );
+            if(user.userAddress == address(0x0000000000000000000000000000000000000000)){
+                allInvestors.push(msg.sender);
+            }
             availablePools[randomPoolId] = true;
             poolInfo.blockNumber = block.number;
             poolInfo.amount = _amountToStake;
@@ -1017,9 +1062,11 @@ contract MainPlayPadContract is Ownable, ReentrancyGuard {
                 user.onlyPrize = true;
             }
             user.stakeStatus = true;
+            user.userAddress = msg.sender;
             user.userPoolIds.push(randomPoolId);
             user.amount = user.amount.add(_amountToStake);
             allStakedAmount = allStakedAmount.add(_amountToStake);
+           
         }
 
         allRewardDebt = allRewardDebt.sub(user.rewardDebt);
@@ -1092,8 +1139,7 @@ contract MainPlayPadContract is Ownable, ReentrancyGuard {
     }
 
 
-    function withdrawPoolRemainder() external onlyOwner nonReentrant {
-        require(block.number > finishBlock, "Allow after finish");
+    function withdrawPoolRemainder() external onlyApprover nonReentrant {
         updatePool();
         uint256 pending =
             allStakedAmount.mul(accTokensPerShare).div(1e18).sub(allRewardDebt);
@@ -1105,4 +1151,196 @@ contract MainPlayPadContract is Ownable, ReentrancyGuard {
     }
 }
 
+
+
+
+
+
+
+
+
+contract PlayPadIdoContract is ReentrancyGuard, Ownable {
+   
+    //Deployed by Main Contract
+    MainPlayPadContract deployerContract;
+    using SafeERC20 for IERC20;
+    using SafeMath for uint256;
+
+    IERC20 public busdToken; //Stable coin token contract address
+    IERC20 public saleToken; //Sale token contract address
+    uint256 public hardcapUsd; //hardcap value as usd 
+    uint256 public totalSellAmountToken; //total amount to be sold
+    uint256 public maxInvestorCount; //max. investor count
+    uint256 public maxBuyValue; //max buying value per investor
+    bool public contractStatus; //Contract running status
+    uint256 public startTime; //IDO participation start time
+    uint256 public endTime; //IDO participation end time
+    uint256 public totalSoldAmountToken; //total sold amount as token
+    uint256 public totalSoldAmountUsd; // total sold amount as usd
+    uint256 public lockTime; //unlock date to get claim 
+    address[] public whitelistedAddresses; //whitelisted address as array
+    uint256[] public claimRoundsDate; //all claim rounds
+    
+   //whitelisted user data per user
+    struct whitelistedInvestorData {
+        uint256 totalBuyingAmountUsd;
+        uint256 totalBuyingAmountToken;
+        uint claimRound;
+        bool isWhitelisted;
+        uint256 lastClaimDate;
+        uint256 claimedValue;
+        address investorAddress;
+        uint256 totalVesting;
+       
+    }
+    //claim round periods
+    struct roundDatas {
+        uint256 roundStartDate;
+        uint256 roundPercent;
+    }
+    //mappings to reach relevant information
+    mapping(address => whitelistedInvestorData) public _investorData;
+    mapping(uint256 => roundDatas) public _roundDatas;
+
+    
+    constructor(
+        IERC20 _busdAddress,
+        IERC20 _saleToken,
+        bool _contractStatus,
+        uint256 _hardcapUsd,
+        uint256 _totalSellAmountToken,
+        uint256 _maxInvestorCount,
+        uint256 _maxBuyValue,
+        uint256 _startTime,
+        uint256 _endTime
+    ) public {
+        require(
+            _startTime < _endTime,
+            "start block must be less than finish block"
+        );
+        require(
+            _endTime > block.timestamp,
+            "finish block must be more than current block"
+        );
+        busdToken = _busdAddress;
+        saleToken = _saleToken;
+        contractStatus = _contractStatus;
+        hardcapUsd = _hardcapUsd;
+        totalSellAmountToken = _totalSellAmountToken;
+        maxInvestorCount = _maxInvestorCount;
+        maxBuyValue = _maxBuyValue;
+        startTime = _startTime;
+        endTime = _endTime;
+    }
+      
+    event NewBuying(address indexed investorAddress, uint256 amount, uint256 timestamp);
+    
+    //modifier to change contract status
+    modifier mustNotPaused() {
+        require(!contractStatus, "Paused!");
+        _;
+    }
+    
+    // function to change status of contract
+    function changePause(bool _contractStatus) public onlyOwner nonReentrant{
+        contractStatus = _contractStatus;
+    }
+    
+    
+    //return all whitelisted addresses as array
+    function getWhitelistedAddresses() public view returns(address[] memory){
+        return whitelistedAddresses;
+    }
+    
+    //change max buy limit
+    function changeMaxBuyValue(uint256 _maxBuyValue) external onlyOwner{
+        maxBuyValue = _maxBuyValue;
+    }
+    // change max investor count
+    function changeMaxInvestorCount(uint256 _maxInvestorCount) external onlyOwner{
+        maxBuyValue = _maxInvestorCount;
+    }
+    
+    //change Start timestamp
+    function changeTimestamps(uint256 _startTime, uint256 _endTime) external onlyOwner{
+        startTime = _startTime;
+        endTime = _endTime;
+    }
+    
+    //calculate token amount according to deposit amount
+    function calculateTokenAmount(uint256 amount) public view returns (uint256) {
+       return (totalSellAmountToken.mul(amount)).div(hardcapUsd);
+    }
+    
+    //buys token if passing controls
+    function buyToken(uint256 busdAmount) external nonReentrant mustNotPaused {
+        require(block.timestamp >= startTime);
+        require(block.timestamp <= endTime);
+        whitelistedInvestorData storage investor = _investorData[msg.sender];
+        require(investor.isWhitelisted);
+        require(maxBuyValue >= investor.totalBuyingAmountUsd.add(busdAmount), "Opps! You can't buy more than maximum limit.");
+        require(investor.totalVesting >= investor.totalBuyingAmountUsd.add(busdAmount), "Oppss! You reached will reach your max vesting with this value, please try again with lower value.");
+        require(busdToken.transferFrom(msg.sender, address(this), busdAmount));
+        uint256 totalTokenAmount = calculateTokenAmount(busdAmount);
+        investor.totalBuyingAmountUsd = investor.totalBuyingAmountUsd.add(busdAmount);
+        investor.totalBuyingAmountToken = investor.totalBuyingAmountToken.add(totalTokenAmount);
+        investor.investorAddress = msg.sender;
+        totalSoldAmountToken = totalSoldAmountToken.add(totalTokenAmount);
+        totalSoldAmountUsd = totalSoldAmountUsd.add(busdAmount);
+        emit NewBuying(msg.sender, busdAmount, block.timestamp);
+    }
+    
+    //emergency withdraw function in worst cases
+    function emergencyWithdrawAllBusd() external payable nonReentrant onlyOwner {
+        require(busdToken.transferFrom(address(this), msg.sender, busdToken.balanceOf(address(this))));
+    }
+    //change lock time to prevent missing values
+    function changeLockTime(uint256 _lockTime) external nonReentrant onlyOwner {
+        lockTime = _lockTime;
+    }
+    //emergency withdraw for tokens in worst cases
+     function withdrawTokens() external nonReentrant onlyOwner {
+        require(saleToken.transfer(msg.sender, saleToken.balanceOf(address(this))));
+    }
+    
+    //claim tokens according to claim periods 
+     function claimTokens() external nonReentrant {
+        require(block.timestamp >= lockTime, "bad lock time");
+        whitelistedInvestorData storage investor = _investorData[msg.sender];
+        require(investor.isWhitelisted, "you are not whitelisted");
+        uint256 investorRoundNumber = investor.claimRound;
+        roundDatas storage roundDetail = _roundDatas[investorRoundNumber];
+        require(roundDetail.roundStartDate != 0 ,"round didn't added yet");
+        require(block.timestamp >= roundDetail.roundStartDate ,"round didn't start yet");
+        require(investor.totalBuyingAmountToken >= investor.claimedValue.add(investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100)) ,"already you got all your tokens");
+        require(saleToken.transfer(msg.sender, investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100)) ,"bad transfer");
+        investor.claimRound = investor.claimRound.add(1);
+        investor.lastClaimDate = block.timestamp;
+        investor.claimedValue = investor.claimedValue.add(investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100));
+    }
+     
+    //add new claim round
+    function addNewClaimRound(uint256 _roundNumber, uint256 _roundStartDate, uint256 _claimPercent) external nonReentrant onlyOwner {
+    roundDatas storage roundDetail = _roundDatas[_roundNumber];
+    roundDetail.roundStartDate = _roundStartDate;
+    roundDetail.roundPercent = _claimPercent;
+    claimRoundsDate.push(_roundStartDate);
+    }
+    
+   
+    /*
+    Define users vestings and addresses according to datas taken from javascript. function at javascript controls buy limits and other details
+    after that it multiples stake duration time of users with their deposited amounts and converts them to percentage based result and calculate their buying amounts according to tokenomics of IDO
+    */
+    
+    function addUsersToWhitelist(address[] memory _whitelistedAddresses, uint256[] memory _buyingLimits) external onlyOwner nonReentrant{ 
+        for(uint256 i = 0;  i < _whitelistedAddresses.length; i++){
+             whitelistedInvestorData storage investor = _investorData[_whitelistedAddresses[i]];
+             investor.totalVesting = _buyingLimits[i];
+             investor.isWhitelisted = true;
+             whitelistedAddresses.push(_whitelistedAddresses[i]);
+        }
+       
+    }
+ }
 
