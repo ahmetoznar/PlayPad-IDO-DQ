@@ -1246,6 +1246,9 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         contractStatus = _contractStatus;
     }
     
+     function changeSaleTokenAddress(IERC20 _contractAddress) external onlyOwner nonReentrant {
+        saleToken = _contractAddress;
+    } 
     
     //return all whitelisted addresses as array
     function getWhitelistedAddresses() public view returns(address[] memory){
