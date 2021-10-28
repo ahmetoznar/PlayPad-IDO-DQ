@@ -1294,7 +1294,7 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
     }
     
     //emergency withdraw function in worst cases
-    function emergencyWithdrawAllBusd() external payable nonReentrant onlyOwner {
+    function emergencyWithdrawAllBusd() external nonReentrant onlyOwner {
         require(busdToken.transferFrom(address(this), msg.sender, busdToken.balanceOf(address(this))));
     }
     //change lock time to prevent missing values
