@@ -93,6 +93,10 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         return whitelistedAddresses;
     }
     
+     function changeSaleTokenAddress(IERC20 _contractAddress) external onlyOwner nonReentrant {
+        saleToken = _contractAddress;
+    } 
+    
     //change max buy limit
     function changeMaxBuyValue(uint256 _maxBuyValue) external onlyOwner{
         maxBuyValue = _maxBuyValue;
