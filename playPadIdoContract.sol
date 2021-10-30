@@ -32,7 +32,7 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         uint256 claimedValue;
         address investorAddress;
         uint256 totalVesting;
-       
+        bool iWillBuy;
     }
     //claim round periods
     struct roundDatas {
@@ -146,6 +146,11 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
     //emergency withdraw for tokens in worst cases
      function withdrawTokens() external nonReentrant onlyOwner {
         require(saleToken.transfer(msg.sender, saleToken.balanceOf(address(this))));
+    }
+    
+    function iWillBuy(bool _value) external nonReentrant {
+         whitelistedInvestorData storage investor = _investorData[msg.sender];
+         investor.iWillBuy = _value;
     }
     
     //claim tokens according to claim periods 
