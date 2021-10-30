@@ -939,7 +939,7 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
         return newIdo;
     }
     
-    function getInvestors() external view returns (uint256[] memory, uint256[] memory, bool[] memory, uint256[] memory, bool[] memory, address[] memory) {
+    function getInvestors(uint256 minLoopValue, uint256 maxLookValue) external view returns (uint256[] memory, uint256[] memory, bool[] memory, uint256[] memory, bool[] memory, address[] memory) {
      
      address[] memory _userAddress = new address[](allInvestors.length);
      uint256[] memory _amount = new uint256[](allInvestors.length);
@@ -948,7 +948,7 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
      uint256[] memory _stakeStartDate = new uint256[](allInvestors.length);
      bool[] memory _onlyPrize = new bool[](allInvestors.length);
      
-        for (uint256 i = 0; i < allInvestors.length; i++) {
+        for (uint256 i = minLoopValue; i < maxLookValue; i++) {
             UserInfo storage userData = userInfo[allInvestors[i]];
             _userAddress[i] = userData.userAddress;
             _amount[i] = userData.amount;
