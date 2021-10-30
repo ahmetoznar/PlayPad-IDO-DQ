@@ -1191,6 +1191,7 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         uint256 claimedValue;
         address investorAddress;
         uint256 totalVesting;
+        bool iWillBuy;
        
     }
     //claim round periods
@@ -1259,6 +1260,13 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
     function changeMaxBuyValue(uint256 _maxBuyValue) external onlyOwner{
         maxBuyValue = _maxBuyValue;
     }
+    
+     // Change iWillBuy
+    function iWillBuy(bool _value) external nonReentrant {
+         whitelistedInvestorData storage investor = _investorData[msg.sender];
+         investor.iWillBuy = _value;
+    }
+    
     // change max investor count
     function changeMaxInvestorCount(uint256 _maxInvestorCount) external onlyOwner{
         maxBuyValue = _maxInvestorCount;
