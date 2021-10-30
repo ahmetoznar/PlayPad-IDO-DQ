@@ -1166,12 +1166,13 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
 
-    IERC20 public busdToken; //Stable coin token contract address
+      IERC20 public busdToken; //Stable coin token contract address
     IERC20 public saleToken; //Sale token contract address
     uint256 public hardcapUsd; //hardcap value as usd 
     uint256 public totalSellAmountToken; //total amount to be sold
     uint256 public maxInvestorCount; //max. investor count
     uint256 public maxBuyValue; //max buying value per investor
+    uint256 public minBuyValue; //min buying value per investor
     bool public contractStatus; //Contract running status
     uint256 public startTime; //IDO participation start time
     uint256 public endTime; //IDO participation end time
@@ -1192,7 +1193,6 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         address investorAddress;
         uint256 totalVesting;
         bool iWillBuy;
-       
     }
     //claim round periods
     struct roundDatas {
@@ -1204,6 +1204,8 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
     mapping(uint256 => roundDatas) public _roundDatas;
 
     
+    
+   
     constructor(
         IERC20 _busdAddress,
         IERC20 _saleToken,
@@ -1212,6 +1214,7 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         uint256 _totalSellAmountToken,
         uint256 _maxInvestorCount,
         uint256 _maxBuyValue,
+        uint256 _minBuyValue,
         uint256 _startTime,
         uint256 _endTime
     ) public {
@@ -1220,7 +1223,7 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
             "start block must be less than finish block"
         );
         require(
-            _endTime > block.timestamp,
+            _endTime > block.number,
             "finish block must be more than current block"
         );
         busdToken = _busdAddress;
@@ -1230,6 +1233,7 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         totalSellAmountToken = _totalSellAmountToken;
         maxInvestorCount = _maxInvestorCount;
         maxBuyValue = _maxBuyValue;
+        minBuyValue= _minBuyValue;
         startTime = _startTime;
         endTime = _endTime;
     }
@@ -1256,28 +1260,6 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         return whitelistedAddresses;
     }
     
-    //change max buy limit
-    function changeMaxBuyValue(uint256 _maxBuyValue) external onlyOwner{
-        maxBuyValue = _maxBuyValue;
-    }
-    
-     // Change iWillBuy
-    function iWillBuy(bool _value) external nonReentrant {
-         whitelistedInvestorData storage investor = _investorData[msg.sender];
-         investor.iWillBuy = _value;
-    }
-    
-    // change max investor count
-    function changeMaxInvestorCount(uint256 _maxInvestorCount) external onlyOwner{
-        maxBuyValue = _maxInvestorCount;
-    }
-    
-    //change Start timestamp
-    function changeTimestamps(uint256 _startTime, uint256 _endTime) external onlyOwner{
-        startTime = _startTime;
-        endTime = _endTime;
-    }
-    
     //calculate token amount according to deposit amount
     function calculateTokenAmount(uint256 amount) public view returns (uint256) {
        return (totalSellAmountToken.mul(amount)).div(hardcapUsd);
@@ -1289,13 +1271,12 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         require(block.timestamp <= endTime);
         whitelistedInvestorData storage investor = _investorData[msg.sender];
         require(investor.isWhitelisted);
-        require(maxBuyValue >= investor.totalBuyingAmountUsd.add(busdAmount), "Opps! You can't buy more than maximum limit.");
-        require(investor.totalVesting >= investor.totalBuyingAmountUsd.add(busdAmount), "Oppss! You reached will reach your max vesting with this value, please try again with lower value.");
+        require(busdAmount >= minBuyValue);
+        require(maxBuyValue >= investor.totalBuyingAmountUsd.add(busdAmount));
         require(busdToken.transferFrom(msg.sender, address(this), busdAmount));
         uint256 totalTokenAmount = calculateTokenAmount(busdAmount);
         investor.totalBuyingAmountUsd = investor.totalBuyingAmountUsd.add(busdAmount);
         investor.totalBuyingAmountToken = investor.totalBuyingAmountToken.add(totalTokenAmount);
-        investor.investorAddress = msg.sender;
         totalSoldAmountToken = totalSoldAmountToken.add(totalTokenAmount);
         totalSoldAmountUsd = totalSoldAmountUsd.add(busdAmount);
         emit NewBuying(msg.sender, busdAmount, block.timestamp);
@@ -1314,6 +1295,12 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         require(saleToken.transfer(msg.sender, saleToken.balanceOf(address(this))));
     }
     
+    // Change iWillBuy
+    function iWillBuy(bool _value) external nonReentrant {
+         whitelistedInvestorData storage investor = _investorData[msg.sender];
+         investor.iWillBuy = _value;
+    }
+    
     //claim tokens according to claim periods 
      function claimTokens() external nonReentrant {
         require(block.timestamp >= lockTime, "bad lock time");
@@ -1321,7 +1308,6 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         require(investor.isWhitelisted, "you are not whitelisted");
         uint256 investorRoundNumber = investor.claimRound;
         roundDatas storage roundDetail = _roundDatas[investorRoundNumber];
-        require(roundDetail.roundStartDate != 0 ,"round didn't added yet");
         require(block.timestamp >= roundDetail.roundStartDate ,"round didn't start yet");
         require(investor.totalBuyingAmountToken >= investor.claimedValue.add(investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100)) ,"already you got all your tokens");
         require(saleToken.transfer(msg.sender, investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100)) ,"bad transfer");
@@ -1338,6 +1324,10 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
     claimRoundsDate.push(_roundStartDate);
     }
     
+   function changeMaxMinBuyLimit(uint256 _maxBuyLimit, uint256 _minBuyLimit) external onlyOwner nonReentrant {
+       maxBuyValue = _maxBuyLimit;
+       minBuyValue = _minBuyLimit;
+   }
    
     /*
     Define users vestings and addresses according to datas taken from javascript. function at javascript controls buy limits and other details
