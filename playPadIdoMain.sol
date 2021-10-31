@@ -1223,7 +1223,7 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
             "start block must be less than finish block"
         );
         require(
-            _endTime > block.number,
+            _endTime > block.timestamp,
             "finish block must be more than current block"
         );
         busdToken = _busdAddress;
