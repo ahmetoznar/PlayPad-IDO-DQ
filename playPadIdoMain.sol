@@ -52,8 +52,8 @@ contract ApproverRole {
     constructor() internal {
         _addApprover(msg.sender);
 
-        firstSignAddress = 0x; // You should change this address to your first sign address
-        secondSignAddress = 0x; // You should change this address to your second sign address
+        firstSignAddress = 0xfA198959854514d80EaDec68533F289f93AB9cc6; // You should change this address to your first sign address
+        secondSignAddress = 0x4d7AB40b8601af760927624200BC5bcD2837BB41; // You should change this address to your second sign address
     }
 
     modifier onlyApprover() {
@@ -939,26 +939,22 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
         return newIdo;
     }
     
-    function getInvestors(uint256 minLoopValue, uint256 maxLookValue) external view returns (uint256[] memory, uint256[] memory, bool[] memory, uint256[] memory, bool[] memory, address[] memory) {
+    function getInvestors() external view returns (uint256[] memory, uint256[] memory, bool[] memory, address[] memory) {
      
      address[] memory _userAddress = new address[](allInvestors.length);
      uint256[] memory _amount = new uint256[](allInvestors.length);
-     uint256[] memory _rewardDebt = new uint256[](allInvestors.length);
-     bool[] memory _stakeStatus = new bool[](allInvestors.length);
      uint256[] memory _stakeStartDate = new uint256[](allInvestors.length);
      bool[] memory _onlyPrize = new bool[](allInvestors.length);
      
-        for (uint256 i = minLoopValue; i < maxLookValue; i++) {
+        for (uint256 i = 0; i < allInvestors.length; i++) {
             UserInfo storage userData = userInfo[allInvestors[i]];
             _userAddress[i] = userData.userAddress;
             _amount[i] = userData.amount;
-            _rewardDebt[i] = userData.rewardDebt;
-            _stakeStatus[i] = userData.stakeStatus;
             _stakeStartDate[i] = userData.stakeStartDate;
             _onlyPrize[i] = userData.onlyPrize;
         }
         
-        return(_amount, _rewardDebt, _stakeStatus, _stakeStartDate, _onlyPrize, _userAddress);
+        return(_amount, _stakeStartDate, _onlyPrize, _userAddress);
   
     }
 
@@ -990,6 +986,7 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
         uint256 _totalSellAmountToken,
         uint256 _maxInvestorCount,
         uint256 _maxBuyValue,
+        uint256 _minBuyValue,
         uint256 _startTime,
         uint256 _endTime
     ) external nonReentrant onlyApprover {
@@ -1001,6 +998,7 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
             _totalSellAmountToken,
             _maxInvestorCount,
             _maxBuyValue,
+            _minBuyValue,
             _startTime,
             _endTime
         );
@@ -1265,6 +1263,13 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
        return (totalSellAmountToken.mul(amount)).div(hardcapUsd);
     }
     
+    function returnUserInfo(address _addresss) public view returns (uint256, uint256, uint, bool, uint256, uint256, address, uint256, bool){
+        whitelistedInvestorData storage investor = _investorData[msg.sender];
+        return (investor.totalBuyingAmountUsd, investor.totalBuyingAmountToken, investor.claimRound, investor.isWhitelisted, investor.lastClaimDate, investor.claimedValue, investor.investorAddress, investor.totalVesting, investor.iWillBuy);
+    }
+    
+      
+    
     //buys token if passing controls
     function buyToken(uint256 busdAmount) external nonReentrant mustNotPaused {
         require(block.timestamp >= startTime);
@@ -1344,4 +1349,3 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
        
     }
  }
-
