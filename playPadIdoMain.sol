@@ -827,7 +827,6 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
     mapping(address => UserInfo) public userInfo;
     mapping(uint256 => UserPoolInfo) public userPoolInfo;
     mapping(uint256 => bool) public availablePools;
-    mapping(address => mapping(address => bool)) public isInvestorWhitelisted;
     mapping(address => bool) public isIdoDeployed;
 
     //live events for contract
@@ -1011,6 +1010,23 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
     function changePrizeLimit(uint256 _amountToStake) external nonReentrant onlyApprover {
         limitForPrize = _amountToStake;
     }
+    
+     function getUserInfo(address _user)
+        external
+        view
+        returns (
+            uint256,
+            uint256,
+            uint256[] memory,
+            bool,
+            uint256,
+            bool
+        )
+    {
+        UserInfo storage user = userInfo[_user];
+        return (user.amount, user.rewardDebt, user.userPoolIds, user.stakeStatus, user.stakeStartDate, user.onlyPrize);
+    }
+
     
     //stake tokens with controls
     function stakeTokens(uint256 _amountToStake) external nonReentrant {
