@@ -1334,6 +1334,7 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         whitelistedInvestorData storage investor = _investorData[msg.sender];
         require(investor.isWhitelisted, "you are not whitelisted");
         uint256 investorRoundNumber = investor.claimRound;
+        require(roundDetail.roundStartDate != 0, "Claim rounds are not available yet.");
         roundDatas storage roundDetail = _roundDatas[investorRoundNumber];
         require(block.timestamp >= roundDetail.roundStartDate ,"round didn't start yet");
         require(investor.totalBuyingAmountToken >= investor.claimedValue.add(investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100)) ,"already you got all your tokens");
