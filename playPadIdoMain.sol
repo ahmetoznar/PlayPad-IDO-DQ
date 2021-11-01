@@ -1106,14 +1106,9 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
         
         if (_amount > 0) {
             user.amount = user.amount.sub(_amount);
-            if(user.amount.sub(_amount) > limitForPrize){
-                user.onlyPrize = false;
-            }else{
-                user.onlyPrize = true;
-                user.stakeStartDate = 0;
-            }
             poolInfo.amount = poolInfo.amount.sub(_amount);
-            if (isPenalty == true && onlyPrize == true) {
+            
+            if (isPenalty) {
                 if (block.number < finishBlock) {
                     if (block.number <= poolInfo.penaltyEndBlockNumber) {
                         penaltyAmount = penaltyRate.mul(_amount).div(1e6);
@@ -1128,7 +1123,18 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
                 user.onlyPrize = true;
                 user.stakeStartDate = 0;
             }
+            
+            if(user.amount > limitForPrize){
+                user.onlyPrize = false;
+            }else{
+                user.onlyPrize = true;
+                user.stakeStartDate = 0;
+            }
+            
         }
+        
+          
+            
         allRewardDebt = allRewardDebt.sub(user.rewardDebt);
         user.rewardDebt = user.amount.mul(accTokensPerShare).div(1e18);
         allRewardDebt = allRewardDebt.add(user.rewardDebt);
