@@ -830,7 +830,7 @@ contract PlayPadIdoFactory is Ownable, ReentrancyGuard {
     }
     
 
-    function getAllPools() public view returns (address[] memory) {
+    function getIdos() public view returns (address[] memory) {
         return newIdo;
     }
 }
