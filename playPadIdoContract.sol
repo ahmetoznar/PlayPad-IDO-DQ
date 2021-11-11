@@ -2,25 +2,27 @@
 
 contract PlayPadIdoContract is ReentrancyGuard, Ownable {
    
-    //Deployed by Main Contract
-    MainPlayPadContract deployerContract;
+    //Deployed by Factory Contract
+    PlayPadIdoFactory deployerContract;
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
 
-    IERC20 public busdToken; //Stable coin token contract address
+    IERC20 public immutable busdToken; //Stable coin token contract address
     IERC20 public saleToken; //Sale token contract address
-    uint256 public hardcapUsd; //hardcap value as usd 
-    uint256 public totalSellAmountToken; //total amount to be sold
-    uint256 public maxInvestorCount; //max. investor count
+    uint256 public immutable hardcapUsd; //hardcap value as usd 
+    uint256 public immutable totalSellAmountToken; //total amount to be sold
     uint256 public maxBuyValue; //max buying value per investor
+    uint256 public minBuyValue; //min buying value per investor
     bool public contractStatus; //Contract running status
-    uint256 public startTime; //IDO participation start time
-    uint256 public endTime; //IDO participation end time
+    uint256 public immutable startTime; //IDO participation start time
+    uint256 public immutable endTime; //IDO participation end time
     uint256 public totalSoldAmountToken; //total sold amount as token
     uint256 public totalSoldAmountUsd; // total sold amount as usd
     uint256 public lockTime; //unlock date to get claim 
     address[] public whitelistedAddresses; //whitelisted address as array
     uint256[] public claimRoundsDate; //all claim rounds
+    uint256 public totalClaimPercent;
+    
     
    //whitelisted user data per user
     struct whitelistedInvestorData {
@@ -44,6 +46,8 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
     mapping(uint256 => roundDatas) public _roundDatas;
 
     
+    
+   
     constructor(
         IERC20 _busdAddress,
         IERC20 _saleToken,
@@ -52,6 +56,7 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         uint256 _totalSellAmountToken,
         uint256 _maxInvestorCount,
         uint256 _maxBuyValue,
+        uint256 _minBuyValue,
         uint256 _startTime,
         uint256 _endTime
     ) public {
@@ -68,8 +73,8 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         contractStatus = _contractStatus;
         hardcapUsd = _hardcapUsd;
         totalSellAmountToken = _totalSellAmountToken;
-        maxInvestorCount = _maxInvestorCount;
         maxBuyValue = _maxBuyValue;
+        minBuyValue= _minBuyValue;
         startTime = _startTime;
         endTime = _endTime;
     }
@@ -87,29 +92,13 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         contractStatus = _contractStatus;
     }
     
-    
-    //return all whitelisted addresses as array
-    function getWhitelistedAddresses() public view returns(address[] memory){
-        return whitelistedAddresses;
-    }
-    
      function changeSaleTokenAddress(IERC20 _contractAddress) external onlyOwner nonReentrant {
         saleToken = _contractAddress;
     } 
     
-    //change max buy limit
-    function changeMaxBuyValue(uint256 _maxBuyValue) external onlyOwner{
-        maxBuyValue = _maxBuyValue;
-    }
-    // change max investor count
-    function changeMaxInvestorCount(uint256 _maxInvestorCount) external onlyOwner{
-        maxBuyValue = _maxInvestorCount;
-    }
-    
-    //change Start timestamp
-    function changeTimestamps(uint256 _startTime, uint256 _endTime) external onlyOwner{
-        startTime = _startTime;
-        endTime = _endTime;
+    //return all whitelisted addresses as array
+    function getWhitelistedAddresses() public view returns(address[] memory){
+        return whitelistedAddresses;
     }
     
     //calculate token amount according to deposit amount
@@ -117,19 +106,25 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
        return (totalSellAmountToken.mul(amount)).div(hardcapUsd);
     }
     
+    function returnUserInfo(address _addresss) public view returns (uint256, uint256, uint, bool, uint256, uint256, address, uint256, bool){
+        whitelistedInvestorData storage investor = _investorData[msg.sender];
+        return (investor.totalBuyingAmountUsd, investor.totalBuyingAmountToken, investor.claimRound, investor.isWhitelisted, investor.lastClaimDate, investor.claimedValue, investor.investorAddress, investor.totalVesting, investor.iWillBuy);
+    }
+    
+      
+    
     //buys token if passing controls
     function buyToken(uint256 busdAmount) external nonReentrant mustNotPaused {
         require(block.timestamp >= startTime);
         require(block.timestamp <= endTime);
         whitelistedInvestorData storage investor = _investorData[msg.sender];
         require(investor.isWhitelisted);
-        require(maxBuyValue >= investor.totalBuyingAmountUsd.add(busdAmount), "Opps! You can't buy more than maximum limit.");
-        require(investor.totalVesting >= investor.totalBuyingAmountUsd.add(busdAmount), "Oppss! You reached will reach your max vesting with this value, please try again with lower value.");
+        require(busdAmount >= minBuyValue);
+        require(maxBuyValue >= investor.totalBuyingAmountUsd.add(busdAmount));
         require(busdToken.transferFrom(msg.sender, address(this), busdAmount));
         uint256 totalTokenAmount = calculateTokenAmount(busdAmount);
         investor.totalBuyingAmountUsd = investor.totalBuyingAmountUsd.add(busdAmount);
         investor.totalBuyingAmountToken = investor.totalBuyingAmountToken.add(totalTokenAmount);
-        investor.investorAddress = msg.sender;
         totalSoldAmountToken = totalSoldAmountToken.add(totalTokenAmount);
         totalSoldAmountUsd = totalSoldAmountUsd.add(busdAmount);
         emit NewBuying(msg.sender, busdAmount, block.timestamp);
@@ -148,6 +143,7 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         require(saleToken.transfer(msg.sender, saleToken.balanceOf(address(this))));
     }
     
+    // Change iWillBuy
     function iWillBuy(bool _value) external nonReentrant {
          whitelistedInvestorData storage investor = _investorData[msg.sender];
          investor.iWillBuy = _value;
@@ -160,10 +156,10 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         require(investor.isWhitelisted, "you are not whitelisted");
         uint256 investorRoundNumber = investor.claimRound;
         roundDatas storage roundDetail = _roundDatas[investorRoundNumber];
-        require(roundDetail.roundStartDate != 0 ,"round didn't added yet");
+        require(roundDetail.roundStartDate != 0, "Claim rounds are not available yet.");
         require(block.timestamp >= roundDetail.roundStartDate ,"round didn't start yet");
         require(investor.totalBuyingAmountToken >= investor.claimedValue.add(investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100)) ,"already you got all your tokens");
-        require(saleToken.transfer(msg.sender, investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100)) ,"bad transfer");
+        saleToken.safeTransferFrom(address(this), msg.sender, investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100));
         investor.claimRound = investor.claimRound.add(1);
         investor.lastClaimDate = block.timestamp;
         investor.claimedValue = investor.claimedValue.add(investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100));
@@ -171,12 +167,25 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
      
     //add new claim round
     function addNewClaimRound(uint256 _roundNumber, uint256 _roundStartDate, uint256 _claimPercent) external nonReentrant onlyOwner {
+    require(_claimPercent.add(totalClaimPercent) <= 100);
+    require(_claimPercent > 0);
+    totalClaimPercent = totalClaimPercent.add(_claimPercent);
     roundDatas storage roundDetail = _roundDatas[_roundNumber];
     roundDetail.roundStartDate = _roundStartDate;
     roundDetail.roundPercent = _claimPercent;
     claimRoundsDate.push(_roundStartDate);
     }
     
+   function changeMaxMinBuyLimit(uint256 _maxBuyLimit, uint256 _minBuyLimit) external onlyOwner nonReentrant {
+       maxBuyValue = _maxBuyLimit;
+       minBuyValue = _minBuyLimit;
+   }
+   
+   function changeDataOfUser(address _user, uint256 _buyingLimits, bool _whitelistStatus) external onlyOwner nonReentrant {
+             whitelistedInvestorData storage investor = _investorData[_user];
+             investor.totalVesting = _buyingLimits;
+             investor.isWhitelisted = _whitelistStatus;
+   }
    
     /*
     Define users vestings and addresses according to datas taken from javascript. function at javascript controls buy limits and other details
@@ -186,10 +195,11 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
     function addUsersToWhitelist(address[] memory _whitelistedAddresses, uint256[] memory _buyingLimits) external onlyOwner nonReentrant{ 
         for(uint256 i = 0;  i < _whitelistedAddresses.length; i++){
              whitelistedInvestorData storage investor = _investorData[_whitelistedAddresses[i]];
+             require(investor.isWhitelisted != true);
              investor.totalVesting = _buyingLimits[i];
              investor.isWhitelisted = true;
              whitelistedAddresses.push(_whitelistedAddresses[i]);
         }
-       
+        
     }
- }
+       
