@@ -998,7 +998,7 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         require(roundDetail.roundStartDate != 0, "Claim rounds are not available yet.");
         require(block.timestamp >= roundDetail.roundStartDate ,"round didn't start yet");
         require(investor.totalBuyingAmountToken >= investor.claimedValue.add(investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100)) ,"already you got all your tokens");
-        saleToken.safeTransferFrom(address(this), msg.sender, investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100));
+        require(saleToken.transfer(msg.sender, investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100)) ,"bad transfer");
         investor.claimRound = investor.claimRound.add(1);
         investor.lastClaimDate = block.timestamp;
         investor.claimedValue = investor.claimedValue.add(investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100));
