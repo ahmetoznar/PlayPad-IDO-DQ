@@ -1070,7 +1070,6 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
         require(user.amount >= _amount, "withdraw: not good");
         require(poolInfo.amount >= _amount, "withdraw: not good");
         require(poolInfo.owner == msg.sender, "you are not owner");
-        require(block.number > finishBlock, "date is not good");
         updatePool();
         uint256 pending = transferPendingReward(user);
         uint256 penaltyAmount = 0;
