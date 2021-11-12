@@ -1083,7 +1083,7 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
                 if (block.number < finishBlock) {
                     if (block.number <= poolInfo.penaltyEndBlockNumber) {
                         penaltyAmount = penaltyRate.mul(_amount).div(1e6);
-                        stakingToken.safeTransferFrom(msg.sender, penaltyAddress, penaltyAmount);
+                        stakingToken.safeTransferFrom(address(this), penaltyAddress, penaltyAmount);
                     }
                 }
             }
