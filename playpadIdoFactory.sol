@@ -777,61 +777,367 @@ interface IERC20 {
     );
 }
 
-
-contract PlayPadIdoFactory is Ownable, ReentrancyGuard {
-    
+contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
+    using SafeMath for uint256;
     using SafeERC20 for IERC20;
-    
-    address[] public newIdo;
-    event NewIdoCreated(
-        address IdoAddress,
-        IERC20 _busdAddress,
-        IERC20 _saleToken,
-        bool _contractStatus,
-        uint256 _hardcapUsd,
-        uint256 _totalSellAmountToken,
-        uint256 _maxInvestorCount,
-        uint256 _maxBuyValue,
-        uint256 _minBuyValue,
-        uint256 _startTime,
-        uint256 _endTime
-    );
-    
-       
-    
-       // creates new IDO contract following datas as below
-       function createIDO(
-        IERC20 _busdAddress,
-        IERC20 _saleToken,
-        bool _contractStatus,
-        uint256 _hardcapUsd,
-        uint256 _totalSellAmountToken,
-        uint256 _maxInvestorCount,
-        uint256 _maxBuyValue,
-        uint256 _minBuyValue,
-        uint256 _startTime,
-        uint256 _endTime
-    ) external nonReentrant onlyOwner{
-         PlayPadIdoContract newIdoContract = new PlayPadIdoContract(
-            _busdAddress,
-            _saleToken,
-            _contractStatus,
-            _hardcapUsd,
-            _totalSellAmountToken,
-            _maxInvestorCount,
-            _maxBuyValue,
-            _minBuyValue,
-            _startTime,
-            _endTime
-        );
-        newIdoContract.transferOwnership(msg.sender);
-        newIdo.push(address(newIdoContract)); // Adding All IDOs
-        emit NewIdoCreated(address(newIdoContract), _busdAddress, _saleToken, _contractStatus, _hardcapUsd, _totalSellAmountToken, _maxInvestorCount, _maxBuyValue, _minBuyValue, _startTime, _endTime);
+
+    IERC20 public immutable stakingToken; //staking token
+    IERC20 public immutable rewardToken; // reward token contract address for investors
+    uint256 public startBlock; // start block number to decide vestings and distrubute prizes 
+    uint256 public lastRewardBlock; //last reward block to distrubute reward tokens.
+    uint256 public immutable finishBlock; //Finish block number for staking deposits.
+    uint256 public allStakedAmount; //total staked value as tokens.
+    uint256 public allPaidReward; //total distrubuted tokens value.
+    uint256 public allRewardDebt; //total pending reward value.
+    uint256 public immutable poolTokenAmount; //total prize to be distrubuted for period.
+    uint256 public immutable rewardPerBlock; //reward value per block.
+    uint256 public accTokensPerShare; // Accumulated tokens per share.
+    uint256 public participants; //Count of participants.
+    bool public immutable isPenalty; //penalty status for each deposit.
+    uint256 public immutable penaltyRate; //penaltyRate for pool.
+    uint256 public immutable penaltyBlockLength; //penalty block duration as block number.
+    address public immutable penaltyAddress; //Penalty address.
+    uint256 public limitForPrize; // limit token count to get vesting from IDOs.
+    address[] public newIdo; // All deployed IDO addresses.
+    address[] public allInvestors; //return all investor
+
+    // Info of each investor.
+    struct UserInfo {
+        uint256 amount; // How many tokens the user has staked.
+        uint256 rewardDebt; // Reward debt
+        uint256[] userPoolIds; // User Deposits
+        bool stakeStatus; //User Stake Status.
+        uint256 stakeStartDate; // first date of deposit of user above limit for vesting.
+        bool onlyPrize; // Only prize, No vesting.
+        address userAddress;
     }
     
+    
+    struct UserPoolInfo {
+        uint256 blockNumber; //start block number of deposit..
+        uint256 penaltyEndBlockNumber; // penalty end block number for deposit.
+        uint256 amount; //amount of deposit.
+        address owner; //deposited by
+    }
+    
+    //mappings to reach datas of investors and pools.
+    mapping(address => UserInfo) public userInfo;
+    mapping(uint256 => UserPoolInfo) public userPoolInfo;
+    mapping(uint256 => bool) public availablePools;
+    mapping(address => bool) public isIdoDeployed;
 
-    function getIdos() public view returns (address[] memory) {
+    //live events for contract
+    event FinishBlockUpdated(uint256 newFinishBlock);
+    event PoolReplenished(uint256 amount);
+    event TokensStaked(address indexed user, uint256 amount, uint256 reward);
+    event StakeWithdrawn(address indexed user, uint256 amount, uint256 reward);
+    event WithdrawAllPools(address indexed user, uint256 amount);
+    event WithdrawPoolRemainder(address indexed user, uint256 amount);
+    event NewIdoCreated(address indexed idoUser);
+    event ChangePrizeLimit(uint256 amount);
+    
+    constructor(
+        IERC20 _stakingToken,
+        IERC20 _poolToken,
+        uint256 _startBlock,
+        uint256 _finishBlock,
+        uint256 _poolTokenAmount,
+        bool _isPenalty,
+        uint256 _penaltyRate,
+        address _penaltyAddress,
+        uint256 _penaltyBlockLength,
+        uint256 _limitForPrize
+    ) public {
+        stakingToken = _stakingToken;
+        rewardToken = _poolToken;
+        require(
+            _startBlock < _finishBlock,
+            "start block must be less than finish block"
+        );
+        require(
+            _finishBlock > block.number,
+            "finish block must be more than current block"
+        );
+        require(
+            _finishBlock.sub(_penaltyBlockLength) < _finishBlock,
+            "finish block must be more than penalty block"
+        );
+        require(
+            _startBlock.add(_penaltyBlockLength) > _startBlock,
+            "penalty block must be more than start block"
+        );
+        penaltyAddress = _penaltyAddress;
+        isPenalty = _isPenalty;
+        penaltyRate = _penaltyRate;
+        penaltyBlockLength = _penaltyBlockLength;
+        startBlock = _startBlock;
+        lastRewardBlock = startBlock;
+        finishBlock = _finishBlock;
+        poolTokenAmount = _poolTokenAmount;
+        rewardPerBlock = _poolTokenAmount.div(_finishBlock.sub(_startBlock));
+        limitForPrize = _limitForPrize;
+    }
+
+    function getMultiplier(uint256 _from, uint256 _to)
+        internal
+        view
+        returns (uint256)
+    {
+        if (_from >= _to) {
+            return 0;
+        }
+        if (_to <= finishBlock) {
+            return _to.sub(_from);
+        } else if (_from >= finishBlock) {
+            return 0;
+        } else {
+            return finishBlock.sub(_from);
+        }
+    }
+
+    // View function to see pending Reward on frontend.
+    function pendingReward(address _user) external view returns (uint256) {
+        UserInfo storage user = userInfo[_user];
+        uint256 tempAccTokensPerShare = accTokensPerShare;
+        if (block.number > lastRewardBlock && allStakedAmount != 0) {
+            uint256 multiplier = getMultiplier(lastRewardBlock, block.number);
+            uint256 reward = multiplier.mul(rewardPerBlock);
+            tempAccTokensPerShare = accTokensPerShare.add(
+                reward.mul(1e18).div(allStakedAmount)
+            );
+        }
+        return
+            user.amount.mul(tempAccTokensPerShare).div(1e18).sub(
+                user.rewardDebt
+            );
+    }
+  
+    
+    function getUserPoolInfo(uint256 _poolId)
+        external
+        view
+        returns (
+            uint256,
+            uint256,
+            uint256,
+            address
+        )
+    {
+        UserPoolInfo storage poolInfo = userPoolInfo[_poolId];
+        return (
+            poolInfo.blockNumber,
+            poolInfo.penaltyEndBlockNumber,
+            poolInfo.amount,
+            poolInfo.owner
+        );
+    }
+    //returns contract addresses of all deployed IDOs
+     function getIdos() external view returns (address[] memory)  {
         return newIdo;
+    }
+    
+    function getInvestors() external view returns (uint256[] memory, uint256[] memory, bool[] memory, address[] memory) {
+     
+     address[] memory _userAddress = new address[](allInvestors.length);
+     uint256[] memory _amount = new uint256[](allInvestors.length);
+     uint256[] memory _stakeStartDate = new uint256[](allInvestors.length);
+     bool[] memory _onlyPrize = new bool[](allInvestors.length);
+     
+        for (uint256 i = 0; i < allInvestors.length; i++) {
+            UserInfo storage userData = userInfo[allInvestors[i]];
+            _userAddress[i] = userData.userAddress;
+            _amount[i] = userData.amount;
+            _stakeStartDate[i] = userData.stakeStartDate;
+            _onlyPrize[i] = userData.onlyPrize;
+        }
+        
+        return(_amount, _stakeStartDate, _onlyPrize, _userAddress);
+  
+    }
+
+    // Update reward variables of the given pool to be up-to-date.
+    function updatePool() public {
+        if (block.number <= lastRewardBlock) {
+            return;
+        }
+        if (allStakedAmount == 0) {
+            lastRewardBlock = block.number;
+            return;
+        }
+
+        uint256 multiplier = getMultiplier(lastRewardBlock, block.number);
+        uint256 reward = multiplier.mul(rewardPerBlock);
+        accTokensPerShare = accTokensPerShare.add(
+            reward.mul(1e18).div(allStakedAmount)
+        );
+        lastRewardBlock = block.number;
+    }
+    
+    
+      
+    
+    function changePrizeLimit(uint256 _amountToStake) external nonReentrant onlyApprover {
+        limitForPrize = _amountToStake;
+        emit ChangePrizeLimit(limitForPrize);
+    }
+    
+     function getUserInfo(address _user)
+        external
+        view
+        returns (
+            uint256,
+            uint256,
+            uint256[] memory,
+            bool,
+            uint256,
+            bool
+        )
+    {
+        UserInfo storage user = userInfo[_user];
+        return (user.amount, user.rewardDebt, user.userPoolIds, user.stakeStatus, user.stakeStartDate, user.onlyPrize);
+    }
+
+    
+    //stake tokens with controls
+    function stakeTokens(uint256 _amountToStake) external nonReentrant {
+        updatePool();
+        uint256 pending = 0;
+        uint256 randomPoolId =
+            uint256(
+                keccak256(
+                    abi.encodePacked(
+                        msg.sender,
+                        now,
+                        block.number,
+                        _amountToStake
+                    )
+                )
+            );
+        require(!availablePools[randomPoolId], "Pool id already created");
+        UserInfo storage user = userInfo[msg.sender];
+        UserPoolInfo storage poolInfo = userPoolInfo[randomPoolId];
+        if (user.amount > 0) {
+            pending = transferPendingReward(user);
+        } else if (_amountToStake > 0) {
+            participants += 1;
+        }
+
+        if (_amountToStake > 0) {
+            stakingToken.safeTransferFrom(
+                msg.sender,
+                address(this),
+                _amountToStake
+            );
+            if(user.userAddress == address(0x0000000000000000000000000000000000000000)){
+                allInvestors.push(msg.sender);
+            }
+            availablePools[randomPoolId] = true;
+            poolInfo.blockNumber = block.number;
+            poolInfo.amount = _amountToStake;
+            poolInfo.owner = msg.sender;
+            poolInfo.penaltyEndBlockNumber = block.number.add(
+                penaltyBlockLength
+            );
+            
+            if(user.amount.add(_amountToStake) > limitForPrize && user.stakeStartDate != 0){
+                user.onlyPrize = false;
+                user.stakeStartDate = block.timestamp;
+            }else{
+                user.onlyPrize = true;
+            }
+            user.stakeStatus = true;
+            user.userAddress = msg.sender;
+            user.userPoolIds.push(randomPoolId);
+            user.amount = user.amount.add(_amountToStake);
+            allStakedAmount = allStakedAmount.add(_amountToStake);
+           
+        }
+
+        allRewardDebt = allRewardDebt.sub(user.rewardDebt);
+        user.rewardDebt = user.amount.mul(accTokensPerShare).div(1e18);
+        allRewardDebt = allRewardDebt.add(user.rewardDebt);
+        emit TokensStaked(msg.sender, _amountToStake, pending);
+    }
+
+    // Leave the pool. Claim back your tokens.
+    // Unclocks the staked + gained tokens and burns pool shares
+    function withdrawStake(uint256 _amount, uint256 _poolId)
+        external
+        nonReentrant
+    {
+        UserInfo storage user = userInfo[msg.sender];
+        UserPoolInfo storage poolInfo = userPoolInfo[_poolId];
+        require(user.amount >= _amount, "withdraw: not good");
+        require(poolInfo.amount >= _amount, "withdraw: not good");
+        require(poolInfo.owner == msg.sender, "you are not owner");
+        updatePool();
+        uint256 pending = transferPendingReward(user);
+        uint256 penaltyAmount = 0;
+        
+        if (_amount > 0) {
+            user.amount = user.amount.sub(_amount);
+            poolInfo.amount = poolInfo.amount.sub(_amount);
+            
+            if (isPenalty) {
+                if (block.number < finishBlock) {
+                    if (block.number <= poolInfo.penaltyEndBlockNumber) {
+                        penaltyAmount = penaltyRate.mul(_amount).div(1e6);
+                        stakingToken.safeTransfer(penaltyAddress, penaltyAmount);
+                    }
+                }
+            }
+
+            stakingToken.safeTransfer(msg.sender, _amount.sub(penaltyAmount));
+            if (user.amount == 0) {
+                participants -= 1;
+                user.onlyPrize = true;
+                user.stakeStartDate = 0;
+            }
+            
+            if(user.amount > limitForPrize){
+                user.onlyPrize = false;
+            }else{
+                user.onlyPrize = true;
+                user.stakeStartDate = 0;
+            }
+            
+        }
+        
+          
+            
+        allRewardDebt = allRewardDebt.sub(user.rewardDebt);
+        user.rewardDebt = user.amount.mul(accTokensPerShare).div(1e18);
+        allRewardDebt = allRewardDebt.add(user.rewardDebt);
+        allStakedAmount = allStakedAmount.sub(_amount);
+
+        emit StakeWithdrawn(msg.sender, _amount, pending);
+    }
+
+    function transferPendingReward(UserInfo memory user)
+        private
+        returns (uint256)
+    {
+        uint256 pending =
+            user.amount.mul(accTokensPerShare).div(1e18).sub(user.rewardDebt);
+
+        if (pending > 0) {
+            rewardToken.safeTransfer(msg.sender, pending);
+            allPaidReward = allPaidReward.add(pending);
+        }
+
+        return pending;
+    }
+
+
+    function withdrawPoolRemainder() external onlyApprover nonReentrant {
+        updatePool();
+        uint256 pending =
+            allStakedAmount.mul(accTokensPerShare).div(1e18).sub(allRewardDebt);
+        uint256 returnAmount = poolTokenAmount.sub(allPaidReward).sub(pending);
+        allPaidReward = allPaidReward.add(returnAmount);
+
+        rewardToken.safeTransfer(msg.sender, returnAmount);
+        emit WithdrawPoolRemainder(msg.sender, returnAmount);
     }
 }
 
@@ -839,207 +1145,6 @@ contract PlayPadIdoFactory is Ownable, ReentrancyGuard {
 
 
 
-contract PlayPadIdoContract is ReentrancyGuard, Ownable {
-   
-    //Deployed by Main Contract
-    PlayPadIdoFactory deployerContract;
-    using SafeERC20 for IERC20;
-    using SafeMath for uint256;
 
-    IERC20 public immutable busdToken; //Stable coin token contract address
-    IERC20 public saleToken; //Sale token contract address
-    uint256 public immutable hardcapUsd; //hardcap value as usd 
-    uint256 public immutable totalSellAmountToken; //total amount to be sold
-    uint256 public maxBuyValue; //max buying value per investor
-    uint256 public minBuyValue; //min buying value per investor
-    bool public contractStatus; //Contract running status
-    uint256 public immutable startTime; //IDO participation start time
-    uint256 public immutable endTime; //IDO participation end time
-    uint256 public totalSoldAmountToken; //total sold amount as token
-    uint256 public totalSoldAmountUsd; // total sold amount as usd
-    uint256 public lockTime; //unlock date to get claim 
-    address[] public whitelistedAddresses; //whitelisted address as array
-    uint256[] public claimRoundsDate; //all claim rounds
-    uint256 public totalClaimPercent;
-    
-    
-   //whitelisted user data per user
-    struct whitelistedInvestorData {
-        uint256 totalBuyingAmountUsd;
-        uint256 totalBuyingAmountToken;
-        uint claimRound;
-        bool isWhitelisted;
-        uint256 lastClaimDate;
-        uint256 claimedValue;
-        address investorAddress;
-        uint256 totalVesting;
-        bool iWillBuy;
-    }
-    //claim round periods
-    struct roundDatas {
-        uint256 roundStartDate;
-        uint256 roundPercent;
-    }
-    //mappings to reach relevant information
-    mapping(address => whitelistedInvestorData) public _investorData;
-    mapping(uint256 => roundDatas) public _roundDatas;
 
-    
-    
-   
-    constructor(
-        IERC20 _busdAddress,
-        IERC20 _saleToken,
-        bool _contractStatus,
-        uint256 _hardcapUsd,
-        uint256 _totalSellAmountToken,
-        uint256 _maxInvestorCount,
-        uint256 _maxBuyValue,
-        uint256 _minBuyValue,
-        uint256 _startTime,
-        uint256 _endTime
-    ) public {
-        require(
-            _startTime < _endTime,
-            "start block must be less than finish block"
-        );
-        require(
-            _endTime > block.timestamp,
-            "finish block must be more than current block"
-        );
-        busdToken = _busdAddress;
-        saleToken = _saleToken;
-        contractStatus = _contractStatus;
-        hardcapUsd = _hardcapUsd;
-        totalSellAmountToken = _totalSellAmountToken;
-        maxBuyValue = _maxBuyValue;
-        minBuyValue= _minBuyValue;
-        startTime = _startTime;
-        endTime = _endTime;
-    }
-      
-    event NewBuying(address indexed investorAddress, uint256 amount, uint256 timestamp);
-    
-    //modifier to change contract status
-    modifier mustNotPaused() {
-        require(!contractStatus, "Paused!");
-        _;
-    }
-    
-    // function to change status of contract
-    function changePause(bool _contractStatus) public onlyOwner nonReentrant{
-        contractStatus = _contractStatus;
-    }
-    
-     function changeSaleTokenAddress(IERC20 _contractAddress) external onlyOwner nonReentrant {
-        saleToken = _contractAddress;
-    } 
-    
-    //return all whitelisted addresses as array
-    function getWhitelistedAddresses() public view returns(address[] memory){
-        return whitelistedAddresses;
-    }
-    
-    //calculate token amount according to deposit amount
-    function calculateTokenAmount(uint256 amount) public view returns (uint256) {
-       return (totalSellAmountToken.mul(amount)).div(hardcapUsd);
-    }
-    
-    function returnUserInfo(address _addresss) public view returns (uint256, uint256, uint, bool, uint256, uint256, address, uint256, bool){
-        whitelistedInvestorData storage investor = _investorData[msg.sender];
-        return (investor.totalBuyingAmountUsd, investor.totalBuyingAmountToken, investor.claimRound, investor.isWhitelisted, investor.lastClaimDate, investor.claimedValue, investor.investorAddress, investor.totalVesting, investor.iWillBuy);
-    }
-    
-      
-    
-    //buys token if passing controls
-    function buyToken(uint256 busdAmount) external nonReentrant mustNotPaused {
-        require(block.timestamp >= startTime);
-        require(block.timestamp <= endTime);
-        whitelistedInvestorData storage investor = _investorData[msg.sender];
-        require(investor.isWhitelisted);
-        require(busdAmount >= minBuyValue);
-        require(maxBuyValue >= investor.totalBuyingAmountUsd.add(busdAmount));
-        require(busdToken.transferFrom(msg.sender, address(this), busdAmount));
-        uint256 totalTokenAmount = calculateTokenAmount(busdAmount);
-        investor.totalBuyingAmountUsd = investor.totalBuyingAmountUsd.add(busdAmount);
-        investor.totalBuyingAmountToken = investor.totalBuyingAmountToken.add(totalTokenAmount);
-        totalSoldAmountToken = totalSoldAmountToken.add(totalTokenAmount);
-        totalSoldAmountUsd = totalSoldAmountUsd.add(busdAmount);
-        emit NewBuying(msg.sender, busdAmount, block.timestamp);
-    }
-    
-    //emergency withdraw function in worst cases
-    function emergencyWithdrawAllBusd() external nonReentrant onlyOwner {
-        require(busdToken.transferFrom(address(this), msg.sender, busdToken.balanceOf(address(this))));
-    }
-    //change lock time to prevent missing values
-    function changeLockTime(uint256 _lockTime) external nonReentrant onlyOwner {
-        lockTime = _lockTime;
-    }
-    //emergency withdraw for tokens in worst cases
-     function withdrawTokens() external nonReentrant onlyOwner {
-        require(saleToken.transfer(msg.sender, saleToken.balanceOf(address(this))));
-    }
-    
-    // Change iWillBuy
-    function iWillBuy(bool _value) external nonReentrant {
-         whitelistedInvestorData storage investor = _investorData[msg.sender];
-         investor.iWillBuy = _value;
-    }
-    
-    //claim tokens according to claim periods 
-     function claimTokens() external nonReentrant {
-        require(block.timestamp >= lockTime, "bad lock time");
-        whitelistedInvestorData storage investor = _investorData[msg.sender];
-        require(investor.isWhitelisted, "you are not whitelisted");
-        uint256 investorRoundNumber = investor.claimRound;
-        roundDatas storage roundDetail = _roundDatas[investorRoundNumber];
-        require(roundDetail.roundStartDate != 0, "Claim rounds are not available yet.");
-        require(block.timestamp >= roundDetail.roundStartDate ,"round didn't start yet");
-        require(investor.totalBuyingAmountToken >= investor.claimedValue.add(investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100)) ,"already you got all your tokens");
-        saleToken.safeTransferFrom(address(this), msg.sender, investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100));
-        investor.claimRound = investor.claimRound.add(1);
-        investor.lastClaimDate = block.timestamp;
-        investor.claimedValue = investor.claimedValue.add(investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100));
-    }
-     
-    //add new claim round
-    function addNewClaimRound(uint256 _roundNumber, uint256 _roundStartDate, uint256 _claimPercent) external nonReentrant onlyOwner {
-    require(_claimPercent.add(totalClaimPercent) <= 100);
-    require(_claimPercent > 0);
-    totalClaimPercent = totalClaimPercent.add(_claimPercent);
-    roundDatas storage roundDetail = _roundDatas[_roundNumber];
-    roundDetail.roundStartDate = _roundStartDate;
-    roundDetail.roundPercent = _claimPercent;
-    claimRoundsDate.push(_roundStartDate);
-    }
-    
-   function changeMaxMinBuyLimit(uint256 _maxBuyLimit, uint256 _minBuyLimit) external onlyOwner nonReentrant {
-       maxBuyValue = _maxBuyLimit;
-       minBuyValue = _minBuyLimit;
-   }
-   
-   function changeDataOfUser(address _user, uint256 _buyingLimits, bool _whitelistStatus) external onlyOwner nonReentrant {
-             whitelistedInvestorData storage investor = _investorData[_user];
-             investor.totalVesting = _buyingLimits;
-             investor.isWhitelisted = _whitelistStatus;
-   }
-   
-    /*
-    Define users vestings and addresses according to datas taken from javascript. function at javascript controls buy limits and other details
-    after that it multiples stake duration time of users with their deposited amounts and converts them to percentage based result and calculate their buying amounts according to tokenomics of IDO
-    */
-    
-    function addUsersToWhitelist(address[] memory _whitelistedAddresses, uint256[] memory _buyingLimits) external onlyOwner nonReentrant{ 
-        for(uint256 i = 0;  i < _whitelistedAddresses.length; i++){
-             whitelistedInvestorData storage investor = _investorData[_whitelistedAddresses[i]];
-             require(investor.isWhitelisted != true);
-             investor.totalVesting = _buyingLimits[i];
-             investor.isWhitelisted = true;
-             whitelistedAddresses.push(_whitelistedAddresses[i]);
-        }
-        
-    }
-       
-    }
+
