@@ -1070,7 +1070,6 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
         require(user.amount >= _amount, "withdraw: not good");
         require(poolInfo.amount >= _amount, "withdraw: not good");
         require(poolInfo.owner == msg.sender, "you are not owner");
-        require(block.number > finishBlock, "date is not good");
         updatePool();
         uint256 pending = transferPendingReward(user);
         uint256 penaltyAmount = 0;
@@ -1083,7 +1082,7 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
                 if (block.number < finishBlock) {
                     if (block.number <= poolInfo.penaltyEndBlockNumber) {
                         penaltyAmount = penaltyRate.mul(_amount).div(1e6);
-                        stakingToken.safeTransferFrom(address(this), penaltyAddress, penaltyAmount);
+                        stakingToken.safeTransfer(penaltyAddress, penaltyAmount);
                     }
                 }
             }
@@ -1141,4 +1140,11 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
         emit WithdrawPoolRemainder(msg.sender, returnAmount);
     }
 }
+
+
+
+
+
+
+
 
