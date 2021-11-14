@@ -830,7 +830,7 @@ contract PlayPadIdoFactory is Ownable, ReentrancyGuard {
     }
     
 
-    function getIdos() public view returns (address[] memory) {
+    function getAllPools() public view returns (address[] memory) {
         return newIdo;
     }
 }
@@ -853,8 +853,8 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
     uint256 public maxBuyValue; //max buying value per investor
     uint256 public minBuyValue; //min buying value per investor
     bool public contractStatus; //Contract running status
-    uint256 public immutable startTime; //IDO participation start time
-    uint256 public immutable endTime; //IDO participation end time
+    uint256 public startTime; //IDO participation start time
+    uint256 public endTime; //IDO participation end time
     uint256 public totalSoldAmountToken; //total sold amount as token
     uint256 public totalSoldAmountUsd; // total sold amount as usd
     uint256 public lockTime; //unlock date to get claim 
@@ -935,6 +935,15 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         saleToken = _contractAddress;
     } 
     
+     function changeStartTime(uint256 _startTime) external nonReentrant onlyOwner {
+        startTime = _startTime;
+    }
+    
+    function changeFinishTime(uint256 _finishTime) external nonReentrant onlyOwner {
+        endTime = _finishTime;
+    }
+    
+   
     //return all whitelisted addresses as array
     function getWhitelistedAddresses() public view returns(address[] memory){
         return whitelistedAddresses;
@@ -946,7 +955,7 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
     }
     
     function returnUserInfo(address _addresss) public view returns (uint256, uint256, uint, bool, uint256, uint256, address, uint256, bool){
-        whitelistedInvestorData storage investor = _investorData[msg.sender];
+        whitelistedInvestorData storage investor = _investorData[_addresss];
         return (investor.totalBuyingAmountUsd, investor.totalBuyingAmountToken, investor.claimRound, investor.isWhitelisted, investor.lastClaimDate, investor.claimedValue, investor.investorAddress, investor.totalVesting, investor.iWillBuy);
     }
     
@@ -971,7 +980,7 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
     
     //emergency withdraw function in worst cases
     function emergencyWithdrawAllBusd() external nonReentrant onlyOwner {
-        require(busdToken.transferFrom(address(this), msg.sender, busdToken.balanceOf(address(this))));
+        require(busdToken.transfer(msg.sender, busdToken.balanceOf(address(this))));
     }
     //change lock time to prevent missing values
     function changeLockTime(uint256 _lockTime) external nonReentrant onlyOwner {
@@ -998,7 +1007,7 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         require(roundDetail.roundStartDate != 0, "Claim rounds are not available yet.");
         require(block.timestamp >= roundDetail.roundStartDate ,"round didn't start yet");
         require(investor.totalBuyingAmountToken >= investor.claimedValue.add(investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100)) ,"already you got all your tokens");
-        saleToken.safeTransferFrom(address(this), msg.sender, investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100));
+        require(saleToken.transfer(msg.sender, investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100)) ,"bad transfer");
         investor.claimRound = investor.claimRound.add(1);
         investor.lastClaimDate = block.timestamp;
         investor.claimedValue = investor.claimedValue.add(investor.totalBuyingAmountToken.mul(roundDetail.roundPercent).div(100));
