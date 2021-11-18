@@ -1039,7 +1039,7 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
                 penaltyBlockLength
             );
             
-            if(user.amount.add(_amountToStake) > limitForPrize && user.stakeStartDate != 0){
+            if(user.amount.add(_amountToStake) > limitForPrize && user.stakeStartDate == 0){
                 user.onlyPrize = false;
                 user.stakeStartDate = block.timestamp;
             }else{
