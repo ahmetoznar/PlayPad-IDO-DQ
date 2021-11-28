@@ -810,7 +810,8 @@ contract PlayPadIdoFactory is Ownable, ReentrancyGuard {
         uint256 _maxBuyValue,
         uint256 _minBuyValue,
         uint256 _startTime,
-        uint256 _endTime
+        uint256 _endTime,
+        bool _isFcfs
     ) external nonReentrant onlyOwner{
          PlayPadIdoContract newIdoContract = new PlayPadIdoContract(
             _busdAddress,
@@ -822,7 +823,8 @@ contract PlayPadIdoFactory is Ownable, ReentrancyGuard {
             _maxBuyValue,
             _minBuyValue,
             _startTime,
-            _endTime
+            _endTime,
+            _isFcfs
         );
         newIdoContract.transferOwnership(msg.sender);
         newIdo.push(address(newIdoContract)); // Adding All IDOs
@@ -861,6 +863,7 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
     address[] public whitelistedAddresses; //whitelisted address as array
     uint256[] public claimRoundsDate; //all claim rounds
     uint256 public totalClaimPercent;
+    bool public isFcfs;
     
     
    //whitelisted user data per user
@@ -897,7 +900,8 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         uint256 _maxBuyValue,
         uint256 _minBuyValue,
         uint256 _startTime,
-        uint256 _endTime
+        uint256 _endTime,
+        bool _isFcfs
     ) public {
         require(
             _startTime < _endTime,
@@ -916,6 +920,7 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         minBuyValue= _minBuyValue;
         startTime = _startTime;
         endTime = _endTime;
+        isFcfs = _isFcfs;
     }
       
     event NewBuying(address indexed investorAddress, uint256 amount, uint256 timestamp);
@@ -926,6 +931,8 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         _;
     }
     
+    
+
     // function to change status of contract
     function changePause(bool _contractStatus) public onlyOwner nonReentrant{
         contractStatus = _contractStatus;
@@ -959,16 +966,21 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         return (investor.totalBuyingAmountUsd, investor.totalBuyingAmountToken, investor.claimRound, investor.isWhitelisted, investor.lastClaimDate, investor.claimedValue, investor.investorAddress, investor.totalVesting, investor.iWillBuy);
     }
     
-      
+    function changeFcfs(bool _value) external nonReentrant onlyOwner {
+        isFcfs = _value;
+    }
     
     //buys token if passing controls
     function buyToken(uint256 busdAmount) external nonReentrant mustNotPaused {
         require(block.timestamp >= startTime);
         require(block.timestamp <= endTime);
         whitelistedInvestorData storage investor = _investorData[msg.sender];
-        require(investor.isWhitelisted);
-        require(busdAmount >= minBuyValue);
-        require(maxBuyValue >= investor.totalBuyingAmountUsd.add(busdAmount));
+        if(!isFcfs){
+        require(investor.isWhitelisted, "You're not whitelisted");
+        }
+        require(busdAmount >= minBuyValue, "You cannot buy less than minimum limit");
+        require(maxBuyValue >= investor.totalBuyingAmountUsd.add(busdAmount), "You cannot buy more than your allocation");
+        require(hardcapUsd >= totalSoldAmountUsd.add(busdAmount), "hardcap value exceed");
         require(busdToken.transferFrom(msg.sender, address(this), busdAmount));
         uint256 totalTokenAmount = calculateTokenAmount(busdAmount);
         investor.totalBuyingAmountUsd = investor.totalBuyingAmountUsd.add(busdAmount);
@@ -1050,5 +1062,16 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         }
         
     }
+
+       function changeDataOfUsers(address[] memory _whitelistedAddresses, uint256[] memory _buyingLimits) external onlyOwner nonReentrant{ 
+        for(uint256 i = 0;  i < _whitelistedAddresses.length; i++){
+             whitelistedInvestorData storage investor = _investorData[_whitelistedAddresses[i]];
+             investor.totalVesting = _buyingLimits[i];
+             investor.isWhitelisted = true;
+             whitelistedAddresses.push(_whitelistedAddresses[i]);
+        }
+        
+    }
+       
        
     }
