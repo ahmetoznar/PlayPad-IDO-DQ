@@ -979,7 +979,8 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         require(investor.isWhitelisted, "You're not whitelisted");
         }
         require(busdAmount >= minBuyValue, "You cannot buy less than minimum limit");
-        require(maxBuyValue >= investor.totalBuyingAmountUsd.add(busdAmount), "You cannot buy more than your allocation");
+        require(maxBuyValue >= busdAmount, "your amount cannot be bigger than max");
+        require(investor.totalBuyingAmountUsd >= investor.totalBuyingAmountUsd.add(busdAmount), "You cannot buy more than your allocation");
         require(hardcapUsd >= totalSoldAmountUsd.add(busdAmount), "hardcap value exceed");
         require(busdToken.transferFrom(msg.sender, address(this), busdAmount));
         uint256 totalTokenAmount = calculateTokenAmount(busdAmount);
