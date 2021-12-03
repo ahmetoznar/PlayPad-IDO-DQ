@@ -923,7 +923,7 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         isFcfs = _isFcfs;
     }
       
-    event NewBuying(address indexed investorAddress, uint256 amount, uint256 timestamp);
+    event NewBuying(address indexed investorAddress, uint256 amount, uint256 timestamp, uint256 totalSoldAmountUsd);
     
     //modifier to change contract status
     modifier mustNotPaused() {
@@ -988,7 +988,7 @@ contract PlayPadIdoContract is ReentrancyGuard, Ownable {
         investor.totalBuyingAmountToken = investor.totalBuyingAmountToken.add(totalTokenAmount);
         totalSoldAmountToken = totalSoldAmountToken.add(totalTokenAmount);
         totalSoldAmountUsd = totalSoldAmountUsd.add(busdAmount);
-        emit NewBuying(msg.sender, busdAmount, block.timestamp);
+        emit NewBuying(msg.sender, busdAmount, block.timestamp, totalSoldAmountUsd);
     }
     
     //emergency withdraw function in worst cases
