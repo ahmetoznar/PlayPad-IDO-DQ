@@ -690,6 +690,95 @@ library SafeERC20 {
     }
 }
 
+
+pragma solidity >=0.6.0 <0.8.0;
+
+/**
+ * @dev Contract module which allows children to implement an emergency stop
+ * mechanism that can be triggered by an authorized account.
+ *
+ * This module is used through inheritance. It will make available the
+ * modifiers `whenNotPaused` and `whenPaused`, which can be applied to
+ * the functions of your contract. Note that they will not be pausable by
+ * simply including this module, only once the modifiers are put in place.
+ */
+abstract contract Pausable is Context {
+    /**
+     * @dev Emitted when the pause is triggered by `account`.
+     */
+    event Paused(address account);
+
+    /**
+     * @dev Emitted when the pause is lifted by `account`.
+     */
+    event Unpaused(address account);
+
+    bool private _paused;
+
+    /**
+     * @dev Initializes the contract in unpaused state.
+     */
+    constructor() internal {
+        _paused = false;
+    }
+
+    /**
+     * @dev Returns true if the contract is paused, and false otherwise.
+     */
+    function paused() public view virtual returns (bool) {
+        return _paused;
+    }
+
+    /**
+     * @dev Modifier to make a function callable only when the contract is not paused.
+     *
+     * Requirements:
+     *
+     * - The contract must not be paused.
+     */
+    modifier whenNotPaused() {
+        require(!paused(), "Pausable: paused");
+        _;
+    }
+
+    /**
+     * @dev Modifier to make a function callable only when the contract is paused.
+     *
+     * Requirements:
+     *
+     * - The contract must be paused.
+     */
+    modifier whenPaused() {
+        require(paused(), "Pausable: not paused");
+        _;
+    }
+
+    /**
+     * @dev Triggers stopped state.
+     *
+     * Requirements:
+     *
+     * - The contract must not be paused.
+     */
+    function _pause() internal virtual whenNotPaused {
+        _paused = true;
+        emit Paused(_msgSender());
+    }
+
+    /**
+     * @dev Returns to normal state.
+     *
+     * Requirements:
+     *
+     * - The contract must be paused.
+     */
+    function _unpause() internal virtual whenPaused {
+        _paused = false;
+        emit Unpaused(_msgSender());
+    }
+}
+
+
 /**
  * @dev Interface of the ERC20 standard as defined in the EIP.
  */
@@ -777,7 +866,7 @@ interface IERC20 {
     );
 }
 
-contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
+contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard, Pausable {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
@@ -911,7 +1000,7 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
                 user.rewardDebt
             );
     }
-  
+
     
     function getUserPoolInfo(uint256 _poolId)
         external
@@ -931,10 +1020,7 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
             poolInfo.owner
         );
     }
-    //returns contract addresses of all deployed IDOs
-     function getIdos() external view returns (address[] memory)  {
-        return newIdo;
-    }
+    
     
     function getInvestors() external view returns (uint256[] memory, uint256[] memory, bool[] memory, address[] memory) {
      
@@ -999,7 +1085,7 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
 
     
     //stake tokens with controls
-    function stakeTokens(uint256 _amountToStake) external nonReentrant {
+    function stakeTokens(uint256 _amountToStake) external nonReentrant whenNotPaused {
         updatePool();
         uint256 pending = 0;
         uint256 randomPoolId =
@@ -1039,11 +1125,12 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
                 penaltyBlockLength
             );
             
-            if(user.amount.add(_amountToStake) > limitForPrize && user.stakeStartDate != 0){
+            if(user.amount.add(_amountToStake) > limitForPrize && user.stakeStartDate == 0){
                 user.onlyPrize = false;
                 user.stakeStartDate = block.timestamp;
-            }else{
+            }else {
                 user.onlyPrize = true;
+                user.stakeStartDate = block.timestamp;
             }
             user.stakeStatus = true;
             user.userAddress = msg.sender;
@@ -1064,6 +1151,7 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
     function withdrawStake(uint256 _amount, uint256 _poolId)
         external
         nonReentrant
+        whenNotPaused
     {
         UserInfo storage user = userInfo[msg.sender];
         UserPoolInfo storage poolInfo = userPoolInfo[_poolId];
@@ -1140,11 +1228,5 @@ contract MainPlayPadContract is Ownable, ApproverRole, ReentrancyGuard {
         emit WithdrawPoolRemainder(msg.sender, returnAmount);
     }
 }
-
-
-
-
-
-
 
 
